@@ -1,0 +1,9 @@
+# Everything that ends up inside a Linux container or host needs LF endings,
+# even when it's edited on Windows. CRLF breaks shell scripts and shebangs.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.zip binary

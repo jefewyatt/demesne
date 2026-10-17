@@ -1,0 +1,16 @@
+# Secrets and local overrides
+.env
+*.env
+!env.example
+*.local.yaml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

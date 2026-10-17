@@ -1,0 +1,32 @@
+# Single source of truth for the machines this repo deploys to.
+# scripts/new_service.py and scripts/validate.py both read this file,
+# and AGENTS.md points coding agents here.
+#
+# >>> PERSONALIZE: every line marked "CHANGE ME" before first use. <<<
+
+[git]
+# Forgejo host:port, no scheme. Komodo clones the repo from here.
+provider = "192.168.1.96:3000"
+https = false               # Forgejo on the LAN over plain HTTP
+account = "komodo"          # Forgejo user whose read-only token Komodo uses   CHANGE ME if different
+repo = "jeff/homelab"       # owner/repo on Forgejo                            CHANGE ME
+branch = "main"             # the only branch that ever deploys
+
+# Each key below must exactly match the Server name in Komodo
+# (KOMODO_FIRST_SERVER_NAME for the NAS, --connect-as for the Orange Pi).
+
+[hosts.nas]
+arch = "amd64"
+description = "OMV8 NAS, Intel N150, ZFS RAIDZ1 pool at /tank"
+address = "192.168.1.96"
+appdata = "/tank/appdata"   # persistent data root; each service gets <appdata>/<service>
+# Host ports already taken by things this repo doesn't manage
+# (SSH, OMV web UI, Forgejo, Forgejo SSH, Komodo). validate.py refuses to reuse them.
+reserved_ports = [22, 80, 443, 2222, 3000, 9120]   # CHANGE ME if you run other host services
+
+[hosts.orangepi]
+arch = "arm64"
+description = "Orange Pi 6 Plus, Ubuntu 24.04, 1TB NVMe"
+address = "192.168.1.XXX"   # CHANGE ME
+appdata = "/srv/appdata"    # CHANGE ME if you keep data elsewhere on the NVMe
+reserved_ports = [22]       # CHANGE ME: add ports used by anything you run outside Komodo (e.g. the NudeNet service)
