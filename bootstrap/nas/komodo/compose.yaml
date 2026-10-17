@@ -1,0 +1,55 @@
+# Komodo Core + MongoDB + the NAS's own Periphery agent.
+# Adapted from the official mongo.compose.yaml for Komodo v2:
+#   https://github.com/moghtech/komodo/blob/main/compose/mongo.compose.yaml
+#
+# This is bootstrap infrastructure: deploy it with plain `docker compose`
+# on the NAS, NOT through Komodo itself. See bootstrap/README.md.
+
+services:
+  mongo:
+    image: mongo:8
+    labels:
+      komodo.skip: # keep Komodo's StopAllContainers from stopping its own DB
+    command: --quiet --wiredTigerCacheSizeGB 0.25
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${KOMODO_DATABASE_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${KOMODO_DATABASE_PASSWORD}
+
+  core:
+    image: ghcr.io/moghtech/komodo-core:${COMPOSE_KOMODO_IMAGE_TAG:-2}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    ports:
+      - 9120:9120
+    env_file: ./.env
+    environment:
+      KOMODO_DATABASE_ADDRESS: mongo:27017
+    volumes:
+      - keys:/config/keys
+      - ${COMPOSE_KOMODO_BACKUPS_PATH}:/backups
+
+  periphery:
+    image: ghcr.io/moghtech/komodo-periphery:${COMPOSE_KOMODO_IMAGE_TAG:-2}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - core
+    env_file: ./.env
+    volumes:
+      - keys:/config/keys
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/proc
+      # Stack clones live here. Must be the SAME path inside and outside the
+      # container, or relative bind mounts in stacks resolve to the wrong place.
+      - ${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}:${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}
+
+volumes:
+  mongo-data:
+  mongo-config:
+  keys:

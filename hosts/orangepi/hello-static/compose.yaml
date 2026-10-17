@@ -1,0 +1,31 @@
+# hello-static: pipeline smoke test for a prebuilt image on the Orange Pi.
+# The page lives inline in this file (compose `configs.content`), so editing it
+# changes compose.yaml, which is exactly what redeploy-if-changed diffs on.
+
+services:
+  web:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports:
+      - "8100:80"
+    configs:
+      - source: index
+        target: /usr/share/nginx/html/index.html
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+configs:
+  index:
+    content: |
+      <!doctype html>
+      <html>
+        <head><meta charset="utf-8"><title>hello-static</title></head>
+        <body style="font-family: system-ui; padding: 2rem">
+          <h1>Hello from the Orange Pi</h1>
+          <p>Deployed by Komodo from the homelab repo.</p>
+        </body>
+      </html>

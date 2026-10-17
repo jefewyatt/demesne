@@ -1,0 +1,30 @@
+# Forgejo: the git server agents push to and Komodo pulls from.
+# Bootstrap infrastructure: deploy with plain `docker compose`, not Komodo
+# (Komodo reads its config from this repo, so Forgejo can't depend on Komodo).
+#
+# Before first start, the data dir must exist and be owned by USER_UID:USER_GID.
+# See bootstrap/README.md step 1.
+
+services:
+  forgejo:
+    # Pin to a major. Check https://forgejo.org/releases/ for the current stable/LTS.
+    image: codeberg.org/forgejo/forgejo:16
+    container_name: forgejo
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"   # CHANGE ME to match `id -u` of the owner of /tank/appdata/forgejo
+      USER_GID: "1000"   # CHANGE ME to match `id -g`
+      FORGEJO__server__ROOT_URL: http://192.168.1.96:3000/
+      FORGEJO__server__SSH_DOMAIN: 192.168.1.96
+      FORGEJO__server__SSH_PORT: "2222"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      # By default Forgejo refuses to send webhooks to LAN addresses.
+      # Komodo lives on the LAN, so allow private + loopback targets.
+      FORGEJO__webhook__ALLOWED_HOST_LIST: private,loopback
+      FORGEJO__actions__ENABLED: "true"
+    volumes:
+      - /tank/appdata/forgejo:/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3000:3000"
+      - "2222:22"

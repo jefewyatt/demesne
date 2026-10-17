@@ -1,0 +1,21 @@
+# PR check: runs scripts/validate.py on every pull request so agents see
+# convention errors before Jeff reviews.
+#
+# Optional: needs a Forgejo Actions runner (see bootstrap/README.md, step 10).
+# This job only reads the repo. It never deploys and has no access to the
+# hosts' Docker, so it's safe to run on branches pushed by agents.
+
+on:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: docker
+    container:
+      image: node:22-bookworm
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v4
+      - name: Install PyYAML
+        run: apt-get update -qq && apt-get install -y -qq python3-yaml
+      - name: Validate conventions
+        run: python3 scripts/validate.py

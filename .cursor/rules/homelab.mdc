@@ -1,0 +1,14 @@
+---
+description: Homelab deploy conventions (read AGENTS.md)
+alwaysApply: true
+---
+
+This repo deploys to real machines when changes merge to `main`.
+Before changing anything, read and follow `AGENTS.md` at the repo root.
+
+Non-negotiables:
+- Work on a branch and open a PR. Never push to `main`.
+- New services: `python scripts/new_service.py ...`, never hand-copied.
+- Run `python scripts/validate.py` before every PR; 0 errors required.
+- Never commit secrets; use Komodo `[[SECRET]]` references in the stack's environment.
+- `hosts/orangepi/**` runs on arm64.
