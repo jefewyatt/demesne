@@ -1,0 +1,78 @@
+# Immich v3.2.2 on the NAS. Same containers as the stack started by hand
+# from /tank/appdata/immich/compose.yml. Komodo sets the project name from
+# the stack name (immich). Do not add a top-level name.
+#
+# Quick Sync (immich-server) and OpenVINO (immich-machine-learning) both
+# need the N150 iGPU at /dev/dri. The library and Postgres stay on the
+# paths that stack already uses, which are outside ${APPDATA}.
+
+x-homelab:
+  allow:
+    devices: "Intel N150 Quick Sync on immich-server and OpenVINO on immich-machine-learning both use /dev/dri"
+    host-path: "Keep the running paths: library at /tank/immich/library (ZFS) and Postgres at /var/lib/immich/postgres (boot NVMe). /etc/localtime is read-only."
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:v3.2.2
+    volumes:
+      - ${UPLOAD_LOCATION}:/data
+      - /etc/localtime:/etc/localtime:ro
+    devices:
+      - /dev/dri:/dev/dri
+    env_file:
+      - .env
+    ports:
+      - "2283:2283"
+    depends_on:
+      - redis
+      - database
+    restart: unless-stopped
+    # Image HEALTHCHECK stays in force. disable: false is enough for validate.py.
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:v3.2.2-openvino
+    volumes:
+      - model-cache:/cache
+    devices:
+      - /dev/dri:/dev/dri
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+
+  redis:
+    container_name: immich_redis
+    image: valkey/valkey:9
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  database:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+    env_file:
+      - .env
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_DB: ${DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE_NAME}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  model-cache:
