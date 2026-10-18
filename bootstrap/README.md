@@ -6,30 +6,54 @@ Forgejo's UI stays on plain HTTP on the LAN. Komodo's UI is HTTPS on the NAS
 management IP only (Caddy in front of Core), and a host firewall should limit
 who can open port 9120. Don't port-forward Forgejo or Komodo to the internet.
 
+**Preferred path on the core host (NAS):** copy `bootstrap/nas` over and run the
+interview script. It asks for every `CHANGE ME` / `CHANGE_ME` value, writes
+Forgejo + Komodo config, optionally starts the stacks, and prints the remaining
+browser checklist.
+
+```powershell
+# from a machine that has this repo (PowerShell has scp)
+scp -r bootstrap/nas <nas-user>@192.168.1.96:~/bootstrap
+```
+
+```bash
+# on the NAS
+cd ~/bootstrap
+./interview.sh            # write configs only
+./interview.sh --start    # also mkdir, network, compose up, export-ca, firewall
+./interview.sh --dry-run  # rehearse answers; touch nothing
+```
+
+`demesne bootstrap` from a full checkout prints the same pointers (and runs the
+interview if you already have `bootstrap/nas` on this machine).
+
+Manual steps below stay as the source of truth for anything the interview
+cannot do in a browser (Forgejo users, tokens, sync, webhook, branch protection).
+
+---
+
 ## 0. Personalize the repo first
 
-Search the repo for `CHANGE ME` and fix each one. The ones that matter most:
+If you skip the interview, search the repo for `CHANGE ME` / `CHANGE_ME` and fix each one:
 
 | File | What to set |
 |---|---|
 | `hosts.toml` | Orange Pi IP, Forgejo `owner/repo` if not `jeff/homelab`, `reserved_ports` for anything you already run on either box |
-| `bootstrap/nas/forgejo/compose.yaml` | `USER_UID` / `USER_GID` (run `id` on the NAS as the user who'll own the data) |
+| `bootstrap/nas/forgejo/compose.yaml` | `USER_UID` / `USER_GID` (run `id` on the NAS as the user who'll own the data); `ROOT_URL` / `SSH_DOMAIN` if the NAS IP is not `192.168.1.96` |
 | `bootstrap/nas/komodo/env.example` | Copied to `.env` in step 2; all `CHANGE_ME` values (secrets + `KOMODO_ALLOWED_SOURCES`) |
 
-If you change `repo`/`account` in `hosts.toml`, also update the two example stack files in `komodo/stacks/` (or delete the examples). `python scripts/validate.py` will flag any mismatch.
+If you change `repo`/`account`/`provider` in `hosts.toml`, also update the example stack files in `komodo/stacks/` (or delete the examples). The interview does this when it finds a full checkout. `python scripts/validate.py` (or `demesne validate`) will flag any mismatch.
+
+---
 
 ## 1. Forgejo on the NAS
 
-**Change before running:** `<nas-user>` below is your SSH login on the NAS. Run the `scp` from the unzipped `homelab` folder on your Windows PC (PowerShell has `scp` built in).
+**Change before running:** `<nas-user>` is your SSH login on the NAS. The `scp` in the intro copies `forgejo/`, `komodo/`, and `interview.sh` into `~/bootstrap/`.
 
-```powershell
-scp -r bootstrap/nas <nas-user>@192.168.1.96:~/bootstrap
-```
-
-**Change before running:** `1000:1000` must match `USER_UID`/`USER_GID` in the Forgejo compose file. Prefix the `docker` commands with `sudo` if your user isn't in the `docker` group.
+**Change before running:** `1000:1000` must match `USER_UID`/`USER_GID` in the Forgejo compose file (the interview sets these from `id -u` / `id -g`). Prefix the `docker` commands with `sudo` if your user isn't in the `docker` group.
 
 ```bash
-# on the NAS
+# on the NAS (interview --start does this for you)
 sudo mkdir -p /tank/appdata/forgejo /tank/appdata/komodo/backups
 sudo chown 1000:1000 /tank/appdata/forgejo
 # Shared network: Forgejo webhooks reach Komodo Core as http://core:9120
@@ -61,12 +85,14 @@ git remote add origin http://192.168.1.96:3000/jeff/homelab.git
 git push -u origin main
 ```
 
+---
+
 ## 2. Komodo Core + NAS agent
 
-**Change before running:** after `cp`, edit `.env` and replace every `CHANGE_ME` (including `KOMODO_ALLOWED_SOURCES` with your admin PC and Orange Pi IPs). Generate the DB password, webhook secret and JWT secret with `openssl rand -hex 24` (run it three times). Keep the webhook secret handy for step 6.
+**Change before running:** after `cp`, edit `.env` and replace every `CHANGE_ME` (including `KOMODO_ALLOWED_SOURCES` with your admin PC and Orange Pi IPs). Generate the DB password, webhook secret and JWT secret with `openssl rand -hex 24` (run it three times). Keep the webhook secret handy for step 6. The interview writes `.env` from `env.example` and generates secrets when you press Enter.
 
 ```bash
-# on the NAS
+# on the NAS (interview --start does this for you)
 docker network create homelab-komodo 2>/dev/null || true
 cd ~/bootstrap/komodo
 cp env.example .env
@@ -88,6 +114,8 @@ Open **https://komodo.lan:9120** (not http, and not the raw IP — the cert is i
 
 `firewall.sh` inserts iptables rules in `DOCKER-USER` so only `KOMODO_ALLOWED_SOURCES` can open TCP 9120 on `KOMODO_BIND_ADDRESS`. Re-run after reboot unless you persist iptables (OMV iptables plugin or a systemd unit that calls this script).
 
+---
+
 ## 3. Give Komodo read access to the repo
 
 Komodo → Settings → Providers → add a **git** account:
@@ -98,14 +126,24 @@ Komodo → Settings → Providers → add a **git** account:
 
 The stack files and the sync both set HTTPS off, so clones use `http://`. If clones fail with a TLS error, define the provider in a mounted `core.config.toml` instead (`[[git_provider]]` with `https = false`); see https://komo.do/docs/configuration/providers.
 
+---
+
 ## 4. Orange Pi agent
 
 In Komodo → Settings → Onboarding, create an **onboarding key** and copy it (starts with `O-`).
 
+Prefer the demesne helper (from a repo checkout) once `orangepi` is in `hosts.toml`:
+
+```bash
+demesne host script orangepi --onboarding-key O-PASTE-YOUR-KEY -o /tmp/opi-bootstrap.sh
+# scp script + komodo-root-ca.crt to the Orange Pi, then:
+#   bash opi-bootstrap.sh ./komodo-root-ca.crt
+```
+
 **Change before running:** replace `O-PASTE-YOUR-KEY` with that key. `--connect-as` must stay `orangepi` to match `hosts.toml` (or change both).
 
 ```bash
-# on the Orange Pi
+# on the Orange Pi (manual equivalent of the script above)
 docker --version || curl -fsSL https://get.docker.com | sudo sh
 sudo mkdir -p /srv/appdata
 
@@ -122,12 +160,14 @@ curl -sSL https://raw.githubusercontent.com/moghtech/komodo/main/scripts/setup-p
   --connect-as="orangepi" \
   --onboarding-key="O-PASTE-YOUR-KEY"
 
-sudo systemctl enable periphery
+sudo systemctl enable --now periphery
 ```
 
 Use `wss://komodo.lan:9120` (TLS). The NAS's own Periphery container still uses `ws://core:9120` on the compose network.
 
 `orangepi` should appear under **Servers** and show **OK**.
+
+---
 
 ## 5. Create the sync (Komodo reads `komodo/` from the repo)
 
@@ -146,7 +186,9 @@ Click **Execute** (or Run Sync). It should propose creating the `deploy-on-push`
 Then open Procedures → `deploy-on-push` → **Run** once by hand. Both smoke tests should come up:
 
 - http://192.168.1.96:8100 returns JSON from the NAS
-- http://<orangepi-ip>:8100 shows "Hello from the Orange Pi"
+- http://\<orangepi-ip\>:8100 shows "Hello from the Orange Pi"
+
+---
 
 ## 6. Webhook: Forgejo → Komodo
 
@@ -166,6 +208,8 @@ Komodo checks the signature using its GitHub-style listener, which also accepts 
 
 If delivery fails with "webhook can only call allowed HTTP servers", the `FORGEJO__webhook__ALLOWED_HOST_LIST` setting in the Forgejo compose didn't apply. Recreate the container.
 
+---
+
 ## 7. Protect `main`
 
 Repo → Settings → Branches → add a protection rule for `main`:
@@ -175,6 +219,8 @@ Repo → Settings → Branches → add a protection rule for `main`:
 - Later, once step 10 is done: require the `validate` status check.
 
 This rule is what makes "merge = deploy" safe.
+
+---
 
 ## 8. Point the Cursor agent at the repo
 
@@ -192,9 +238,13 @@ echo 'export FORGEJO_TOKEN=AGENT_TOKEN' >> ~/.bashrc
 
 The container must be able to reach `192.168.1.96:3000`. Check with `curl -I http://192.168.1.96:3000`. Agents pick up `AGENTS.md` and `.cursor/rules/` automatically.
 
+---
+
 ## 9. End-to-end test
 
 Ask the agent: *"Change the GREETING of the hello service to 'deployed by an agent' and open a PR."* Review it, merge it, and within about a minute http://192.168.1.96:8100 should show the new greeting. Komodo → Procedures → `deploy-on-push` shows the run.
+
+---
 
 ## 10. Optional: PR checks with a Forgejo runner
 

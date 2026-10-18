@@ -42,8 +42,9 @@ Each host builds its own images. There is no shared registry and no cross-compil
 | `komodo/stacks/<host>/<service>.toml` | Komodo stack (one file per service so parallel agents don't collide) |
 | `komodo/procedures.toml` | `deploy-on-push` webhook target — do not edit |
 | `hosts.toml` | Machines, git settings, reserved ports |
-| `scripts/new_service.py` | Scaffolds a service + stack with correct settings |
-| `scripts/validate.py` | Convention checker; agents run before every PR; CI on PRs |
+| `scripts/demesne` | Homelab CLI: add hosts, scaffold services, validate, list ports |
+| `scripts/new_service.py` | Scaffolds a service + stack (also: `demesne new`) |
+| `scripts/validate.py` | Convention checker (also: `demesne validate`); CI on PRs |
 | `AGENTS.md`, `.cursor/rules/` | Rules for coding agents |
 | `bootstrap/` | One-time Forgejo/Komodo setup (not managed by Komodo) |
 
@@ -68,6 +69,20 @@ Ownership: Komodo owns everything under `hosts/`. Forgejo and Komodo themselves 
 4. **Watch it land.** Komodo → Procedures → `deploy-on-push`; each stack shows build/compose logs.
 5. **Roll back.** Revert the commit and merge the revert. Data under `APPDATA` is not touched by deploys.
 
+### CLI (`scripts/demesne`)
+
+Optional install: `ln -sf "$(pwd)/scripts/demesne" ~/.local/bin/demesne`
+
+| Command | What it does |
+|---|---|
+| `demesne bootstrap` / `demesne interview` | First-time NAS setup (`bootstrap/nas/interview.sh`) |
+| `demesne host add <key> --arch … --address … --appdata …` | Step 1 of adding a host (edits `hosts.toml`) |
+| `demesne host script <key> -o setup.sh` | Bootstrap script for the new machine (steps 2–4) |
+| `demesne host list` / `demesne host show <key>` | Inventory + remaining setup hints |
+| `demesne new <host> <name> --build` | Scaffold a service (`new_service.py`) |
+| `demesne validate` / `demesne check` | Run `validate.py` |
+| `demesne ls` / `demesne ports [host]` / `demesne info` | Services, port map, cheat sheet |
+
 ### Removing a service
 
 1. In Komodo, open the stack → **Destroy** (stops and removes containers).
@@ -78,11 +93,9 @@ Ownership: Komodo owns everything under `hosts/`. Forgejo and Komodo themselves 
 
 ## Adding a new host (Jeff)
 
-Do this when you build a new machine that should run services from this repo. Agents cannot register hosts; you edit `hosts.toml` and install Periphery.
+Do this when you build a new machine that should run services from this repo. Agents cannot register hosts; you edit `hosts.toml` and install Periphery. Prefer the CLI below; the manual steps remain as reference.
 
 ### 1. Decide the host identity
-
-Pick values and add a `[hosts.<key>]` block to `hosts.toml` (Jeff edits this file; agents must not unless you ask):
 
 | Field | Meaning |
 |---|---|
@@ -93,48 +106,54 @@ Pick values and add a `[hosts.<key>]` block to `hosts.toml` (Jeff edits this fil
 | `reserved_ports` | Ports already used outside this repo (SSH, host UIs, etc.). `validate.py` refuses to reuse them |
 | `description` | Human-readable note |
 
-Commit and merge that change (or include it with the first service PR after Periphery is up).
-
-### 2. Prepare the machine
-
-On the new host:
-
 ```bash
-# Docker
-docker --version || curl -fsSL https://get.docker.com | sudo sh
-
-# Persistent data root — match appdata in hosts.toml
-sudo mkdir -p /srv/appdata   # or whatever path you chose
+# Appends [hosts.<key>] to hosts.toml and creates hosts/<key>/ + komodo/stacks/<key>/
+demesne host add media \
+  --arch amd64 \
+  --address 192.168.1.50 \
+  --appdata /srv/appdata \
+  --description "media box" \
+  --reserved-port 22 --reserved-port 8096
 ```
 
-### 3. Trust Komodo's TLS and reach Core
+Commit and merge that change (or include it with the first service PR after Periphery is up). Agents must not edit `hosts.toml` unless you ask.
 
-Komodo UI/API is HTTPS on `komodo.lan:9120`. On the new host (same as for the Orange Pi):
+### 2–4. Prepare the machine, trust TLS, install Periphery
+
+Generate a script for the new host (embeds README steps 2–4). Create an onboarding key in Komodo → Settings → Onboarding first (`O-…`):
 
 ```bash
+demesne host script media --onboarding-key O-PASTE-YOUR-KEY -o /tmp/media-bootstrap.sh
+# On the NAS: export CA via bootstrap/nas/komodo/export-ca.sh
+# scp /tmp/media-bootstrap.sh komodo-root-ca.crt user@192.168.1.50:
+# On the new host:
+bash media-bootstrap.sh ./komodo-root-ca.crt
+```
+
+On the NAS, add this host's IP to `KOMODO_ALLOWED_SOURCES` in the Komodo `.env`, then re-run `firewall.sh` so the new box can open TCP 9120. See [`bootstrap/README.md`](bootstrap/README.md) steps 2 and 4. (`demesne host show <key>` reprints this checklist.)
+
+Manual equivalent (if you prefer not to use the script):
+
+```bash
+# Docker + appdata
+docker --version || curl -fsSL https://get.docker.com | sudo sh
+sudo mkdir -p /srv/appdata   # match appdata in hosts.toml
+
 # Point komodo.lan at the NAS (IP from [hosts.nas].address)
 echo "192.168.1.96 komodo.lan" | sudo tee -a /etc/hosts
 
-# Trust the CA exported on the NAS (bootstrap/nas/komodo/export-ca.sh → komodo-root-ca.crt)
+# Trust the CA (bootstrap/nas/komodo/export-ca.sh → komodo-root-ca.crt)
 sudo cp komodo-root-ca.crt /usr/local/share/ca-certificates/komodo-root-ca.crt
 sudo update-ca-certificates
-```
 
-On the NAS, add this host's IP to `KOMODO_ALLOWED_SOURCES` in the Komodo `.env`, then re-run `firewall.sh` so the new box can open TCP 9120. See [`bootstrap/README.md`](bootstrap/README.md) steps 2 and 4.
-
-### 4. Install Periphery
-
-In Komodo → Settings → Onboarding, create an **onboarding key** (starts with `O-`).
-
-```bash
-# on the new host — --connect-as MUST equal the hosts.toml key
+# Periphery — --connect-as MUST equal the hosts.toml key
 curl -sSL https://raw.githubusercontent.com/moghtech/komodo/main/scripts/setup-periphery.py \
   | sudo python3 - \
   --core-address="wss://komodo.lan:9120" \
   --connect-as="<host-key>" \
   --onboarding-key="O-PASTE-YOUR-KEY"
 
-sudo systemctl enable periphery
+sudo systemctl enable --now periphery
 ```
 
 In Komodo → Servers, the new name should show **OK**.
@@ -142,6 +161,11 @@ In Komodo → Servers, the new name should show **OK**.
 ### 5. Deploy services to it
 
 Once the host is in `hosts.toml` and Periphery is **OK**, agents (or you) can scaffold services under `hosts/<host-key>/` — see the next section. First stack lands via the usual PR → merge → `deploy-on-push` path.
+
+```bash
+demesne new media <name> --build   # or --image <pinned>
+demesne validate
+```
 
 **Placement reminder:** heavy / storage-bound / always-on → `nas`. Experiments, AI/NPU, or hardware-tied work → the machine that has the hardware (today: `orangepi`).
 
