@@ -2,7 +2,9 @@
 
 Order matters: Forgejo first (it hosts the repo), then Komodo (it reads the repo), then the Orange Pi agent, then wiring. Budget an hour or so.
 
-Everything here runs on your LAN over plain HTTP. Don't port-forward Forgejo or Komodo to the internet.
+Forgejo's UI stays on plain HTTP on the LAN. Komodo's UI is HTTPS on the NAS
+management IP only (Caddy in front of Core), and a host firewall should limit
+who can open port 9120. Don't port-forward Forgejo or Komodo to the internet.
 
 ## 0. Personalize the repo first
 
@@ -12,7 +14,7 @@ Search the repo for `CHANGE ME` and fix each one. The ones that matter most:
 |---|---|
 | `hosts.toml` | Orange Pi IP, Forgejo `owner/repo` if not `jeff/homelab`, `reserved_ports` for anything you already run on either box |
 | `bootstrap/nas/forgejo/compose.yaml` | `USER_UID` / `USER_GID` (run `id` on the NAS as the user who'll own the data) |
-| `bootstrap/nas/komodo/env.example` | Copied to `.env` in step 2; all `CHANGE_ME` values |
+| `bootstrap/nas/komodo/env.example` | Copied to `.env` in step 2; all `CHANGE_ME` values (secrets + `KOMODO_ALLOWED_SOURCES`) |
 
 If you change `repo`/`account` in `hosts.toml`, also update the two example stack files in `komodo/stacks/` (or delete the examples). `python scripts/validate.py` will flag any mismatch.
 
@@ -30,6 +32,9 @@ scp -r bootstrap/nas <nas-user>@192.168.1.96:~/bootstrap
 # on the NAS
 sudo mkdir -p /tank/appdata/forgejo /tank/appdata/komodo/backups
 sudo chown 1000:1000 /tank/appdata/forgejo
+# Shared network: Forgejo webhooks reach Komodo Core as http://core:9120
+# without crossing the LAN TLS listener. Create once; both compose files use it.
+docker network create homelab-komodo 2>/dev/null || true
 cd ~/bootstrap/forgejo
 docker compose up -d
 ```
@@ -58,17 +63,30 @@ git push -u origin main
 
 ## 2. Komodo Core + NAS agent
 
-**Change before running:** after `cp`, edit `.env` and replace every `CHANGE_ME`. Generate the DB password, webhook secret and JWT secret with `openssl rand -hex 24` (run it three times). Keep the webhook secret handy for step 6.
+**Change before running:** after `cp`, edit `.env` and replace every `CHANGE_ME` (including `KOMODO_ALLOWED_SOURCES` with your admin PC and Orange Pi IPs). Generate the DB password, webhook secret and JWT secret with `openssl rand -hex 24` (run it three times). Keep the webhook secret handy for step 6.
 
 ```bash
 # on the NAS
+docker network create homelab-komodo 2>/dev/null || true
 cd ~/bootstrap/komodo
 cp env.example .env
 nano .env
 docker compose up -d
+./export-ca.sh                    # writes ./komodo-root-ca.crt
+set -a && source .env && set +a
+sudo -E ./firewall.sh             # DOCKER-USER allowlist for :9120
 ```
 
-Open http://192.168.1.96:9120 and log in with `KOMODO_INIT_ADMIN_USERNAME` / `_PASSWORD`. Under **Servers**, `nas` should show **OK** within a minute.
+On every machine that will open the UI (and on the Orange Pi), point the TLS hostname at the NAS:
+
+```bash
+# Linux / macOS — use the NAS IP from hosts.toml
+echo "192.168.1.96 komodo.lan" | sudo tee -a /etc/hosts
+```
+
+Open **https://komodo.lan:9120** (not http, and not the raw IP — the cert is issued for `komodo.lan`). The first visit warns until you trust Caddy's internal CA: install `komodo-root-ca.crt` in your OS/browser trust store, or click through for a quick test. Log in with `KOMODO_INIT_ADMIN_USERNAME` / `_PASSWORD`. Under **Servers**, `nas` should show **OK** within a minute.
+
+`firewall.sh` inserts iptables rules in `DOCKER-USER` so only `KOMODO_ALLOWED_SOURCES` can open TCP 9120 on `KOMODO_BIND_ADDRESS`. Re-run after reboot unless you persist iptables (OMV iptables plugin or a systemd unit that calls this script).
 
 ## 3. Give Komodo read access to the repo
 
@@ -91,14 +109,23 @@ In Komodo → Settings → Onboarding, create an **onboarding key** and copy it 
 docker --version || curl -fsSL https://get.docker.com | sudo sh
 sudo mkdir -p /srv/appdata
 
+# Trust the same CA the NAS exported (scp komodo-root-ca.crt over first).
+sudo cp komodo-root-ca.crt /usr/local/share/ca-certificates/komodo-root-ca.crt
+sudo update-ca-certificates
+
+# Same hosts entry as on your admin PC (NAS IP + komodo.lan).
+echo "192.168.1.96 komodo.lan" | sudo tee -a /etc/hosts
+
 curl -sSL https://raw.githubusercontent.com/moghtech/komodo/main/scripts/setup-periphery.py \
   | sudo python3 - \
-  --core-address="ws://192.168.1.96:9120" \
+  --core-address="wss://komodo.lan:9120" \
   --connect-as="orangepi" \
   --onboarding-key="O-PASTE-YOUR-KEY"
 
 sudo systemctl enable periphery
 ```
+
+Use `wss://komodo.lan:9120` (TLS). The NAS's own Periphery container still uses `ws://core:9120` on the compose network.
 
 `orangepi` should appear under **Servers** and show **OK**.
 
@@ -127,11 +154,13 @@ Repo → Settings → Webhooks → Add webhook → **Forgejo**:
 
 | Field | Value |
 |---|---|
-| Target URL | `http://192.168.1.96:9120/listener/github/procedure/deploy-on-push/main` |
+| Target URL | `http://core:9120/listener/github/procedure/deploy-on-push/main` |
 | HTTP method / content type | POST / `application/json` |
 | Secret | `KOMODO_WEBHOOK_SECRET` from `.env` |
 | Trigger | Push events |
 | Branch filter | `main` |
+
+The webhook URL uses the Docker DNS name `core` on the shared `homelab-komodo` network (plain HTTP inside the network). LAN browsers still use `https://komodo.lan:9120`. If Forgejo was created before that network existed, recreate it: `docker network create homelab-komodo; cd ~/bootstrap/forgejo && docker compose up -d`.
 
 Komodo checks the signature using its GitHub-style listener, which also accepts Forgejo's webhooks. Use **Test delivery** and check that the procedure runs in Komodo.
 
