@@ -1,6 +1,7 @@
 # Single source of truth for the machines this repo deploys to.
-# scripts/new_service.py and scripts/validate.py both read this file,
-# and AGENTS.md points coding agents here.
+# scripts/demesne, new_service.py, and validate.py all read this file.
+# Jeff: prefer `demesne host add` over editing by hand. Agents: do not edit
+# unless asked (see README → Adding a new host).
 #
 # >>> PERSONALIZE: every line marked "CHANGE ME" before first use. <<<
 

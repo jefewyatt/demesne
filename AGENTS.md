@@ -35,8 +35,9 @@ hosts/<host>/<service>/compose.yaml     what runs (plus Dockerfile, src/, README
 komodo/stacks/<host>/<service>.toml     how Komodo deploys it (one stack per file)
 komodo/procedures.toml                  the deploy-on-push procedure: do not edit
 hosts.toml                              machines, git settings, reserved ports
-scripts/new_service.py                  scaffold a new service
-scripts/validate.py                     convention checker; must pass
+scripts/demesne                         Jeff-facing CLI (host add/script, new, validate, ls)
+scripts/new_service.py                  scaffold a new service (or: demesne new)
+scripts/validate.py                     convention checker; must pass (or: demesne validate)
 bootstrap/                              one-time infra setup (Forgejo, Komodo): do not edit
 ```
 
