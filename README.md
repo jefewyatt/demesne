@@ -75,6 +75,7 @@ Optional install: `ln -sf "$(pwd)/scripts/demesne" ~/.local/bin/demesne`
 
 | Command | What it does |
 |---|---|
+| `demesne bootstrap` / `demesne interview` | First-time NAS setup (`bootstrap/nas/interview.sh`) |
 | `demesne host add <key> --arch … --address … --appdata …` | Step 1 of adding a host (edits `hosts.toml`) |
 | `demesne host script <key> -o setup.sh` | Bootstrap script for the new machine (steps 2–4) |
 | `demesne host list` / `demesne host show <key>` | Inventory + remaining setup hints |

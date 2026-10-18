@@ -7,6 +7,7 @@ Install (optional):
     ln -sf "$(pwd)/scripts/demesne" ~/.local/bin/demesne
 
 Examples:
+    demesne bootstrap --print-only
     demesne host add media --arch amd64 --address 192.168.1.50 --appdata /srv/appdata
     demesne host script media -o /tmp/media-bootstrap.sh
     demesne new nas recipe-api --build
@@ -409,10 +410,49 @@ def cmd_info(_args: argparse.Namespace) -> int:
     print("  demesne host list           list hosts")
     print("  demesne host add …          register a new machine (edits hosts.toml)")
     print("  demesne host script <key>   emit Periphery bootstrap script")
+    print("  demesne bootstrap           first-time NAS setup (interview)")
     print("  demesne new <host> <name>   scaffold a service")
     print("  demesne validate            run scripts/validate.py")
     print("  demesne ports [host]        port map")
     return 0
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    """Run or point at bootstrap/nas/interview.sh (core-host first-time setup)."""
+    interview = REPO / "bootstrap" / "nas" / "interview.sh"
+    if not interview.is_file():
+        print(f"Missing {interview.relative_to(REPO)}", file=sys.stderr)
+        return 1
+
+    extra = list(args.interview_args or [])
+    if args.dry_run and "--dry-run" not in extra:
+        extra.append("--dry-run")
+    if args.start and "--start" not in extra:
+        extra.append("--start")
+
+    if args.print_only or not sys.stdin.isatty():
+        print("First-time setup for the core host (NAS).")
+        print()
+        print("Copy bootstrap material to the NAS, then run the interview there:")
+        print()
+        print("  scp -r bootstrap/nas <nas-user>@<nas-ip>:~/bootstrap")
+        print("  ssh <nas-user>@<nas-ip>")
+        print("  cd ~/bootstrap && ./interview.sh          # write configs")
+        print("  cd ~/bootstrap && ./interview.sh --start   # also compose up")
+        print()
+        print(f"From a full checkout on the NAS you can also run:")
+        print(f"  {interview}")
+        print()
+        print("Docs: bootstrap/README.md")
+        if args.print_only:
+            return 0
+        if not sys.stdin.isatty():
+            print("stdin is not a TTY; not launching the interview.", file=sys.stderr)
+            return 0
+
+    cmd = ["bash", str(interview), *extra]
+    print(f"Running: {' '.join(cmd)}")
+    return subprocess.call(cmd)
 
 
 # --------------------------------------------------------------------------- #
@@ -519,6 +559,33 @@ def build_parser() -> argparse.ArgumentParser:
 
     info_p = sub.add_parser("info", aliases=["status"], help="repo overview + cheat sheet")
     info_p.set_defaults(func=cmd_info)
+
+    boot_p = sub.add_parser(
+        "bootstrap",
+        aliases=["interview"],
+        help="first-time NAS setup via bootstrap/nas/interview.sh",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            On the NAS (after scp -r bootstrap/nas …:~/bootstrap):
+              ./interview.sh
+              ./interview.sh --start
+
+            From this checkout (interactive TTY):
+              demesne bootstrap
+              demesne bootstrap --start
+              demesne bootstrap --dry-run
+              demesne bootstrap --print-only
+            """),
+    )
+    boot_p.add_argument("--dry-run", action="store_true",
+                        help="pass --dry-run through to the interview")
+    boot_p.add_argument("--start", action="store_true",
+                        help="pass --start (compose up + export-ca + firewall)")
+    boot_p.add_argument("--print-only", action="store_true",
+                        help="print scp/ssh instructions; do not exec the interview")
+    boot_p.add_argument("interview_args", nargs="*",
+                        help="extra args forwarded to interview.sh")
+    boot_p.set_defaults(func=cmd_bootstrap)
 
     return parser
 
