@@ -1,0 +1,11 @@
+# TLS terminator in front of Komodo Core.
+# Core stays on the compose network only; this is the sole host-facing listener.
+#
+# Clients must use the hostname (default komodo.lan), not the raw IP, so the
+# certificate SAN matches. Put `KOMODO_BIND_ADDRESS komodo.lan` in /etc/hosts
+# on admin machines and the Orange Pi (see bootstrap/README.md).
+
+https://{$KOMODO_TLS_HOSTNAME}:9120 {
+	tls internal
+	reverse_proxy core:9120
+}

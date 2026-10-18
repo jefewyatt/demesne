@@ -1,9 +1,13 @@
-# Komodo Core + MongoDB + the NAS's own Periphery agent.
+# Komodo Core + MongoDB + the NAS's own Periphery agent + TLS proxy.
 # Adapted from the official mongo.compose.yaml for Komodo v2:
 #   https://github.com/moghtech/komodo/blob/main/compose/mongo.compose.yaml
 #
 # This is bootstrap infrastructure: deploy it with plain `docker compose`
 # on the NAS, NOT through Komodo itself. See bootstrap/README.md.
+#
+# Host exposure: only Caddy publishes a port, bound to KOMODO_BIND_ADDRESS
+# (not 0.0.0.0). Core and Mongo stay on the compose network. Periphery keeps
+# the Docker socket (that is host-root by design); limit who can reach :9120.
 
 services:
   mongo:
@@ -25,8 +29,9 @@ services:
     restart: unless-stopped
     depends_on:
       - mongo
-    ports:
-      - 9120:9120
+    # No host ports. LAN clients hit Caddy; same-compose services use core:9120.
+    expose:
+      - "9120"
     env_file: ./.env
     environment:
       KOMODO_DATABASE_ADDRESS: mongo:27017
@@ -34,13 +39,38 @@ services:
       - keys:/config/keys
       - ${COMPOSE_KOMODO_BACKUPS_PATH}:/backups
 
+  # TLS reverse proxy: the only process published on the NAS management IP.
+  # Listens on :9120 inside the container; Docker binds that to BIND_ADDRESS only.
+  proxy:
+    image: caddy:2.10-alpine
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - core
+    ports:
+      - "${KOMODO_BIND_ADDRESS:-192.168.1.96}:9120:9120"
+    environment:
+      KOMODO_TLS_HOSTNAME: ${KOMODO_TLS_HOSTNAME:-komodo.lan}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
   periphery:
     image: ghcr.io/moghtech/komodo-periphery:${COMPOSE_KOMODO_IMAGE_TAG:-2}
     init: true
     restart: unless-stopped
     depends_on:
       - core
-    env_file: ./.env
+    # Do not pass env_file here: Core secrets (JWT, DB password, webhook,
+    # admin password) must not sit in the socket-mounted agent container.
+    # Compose still reads .env for ${...} interpolation on the host.
+    environment:
+      PERIPHERY_CORE_ADDRESS: ${PERIPHERY_CORE_ADDRESS:-ws://core:9120}
+      PERIPHERY_CONNECT_AS: ${PERIPHERY_CONNECT_AS:-nas}
+      PERIPHERY_CORE_PUBLIC_KEYS: ${PERIPHERY_CORE_PUBLIC_KEYS:-file:/config/keys/core.pub}
+      PERIPHERY_ROOT_DIRECTORY: ${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}
+      PERIPHERY_INCLUDE_DISK_MOUNTS: ${PERIPHERY_INCLUDE_DISK_MOUNTS:-/etc/hostname}
     volumes:
       - keys:/config/keys
       - /var/run/docker.sock:/var/run/docker.sock
@@ -49,7 +79,16 @@ services:
       # container, or relative bind mounts in stacks resolve to the wrong place.
       - ${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}:${PERIPHERY_ROOT_DIRECTORY:-/etc/komodo}
 
+networks:
+  default:
+    # Pre-create: docker network create homelab-komodo
+    # (Forgejo joins the same network so webhooks can use http://core:9120.)
+    external: true
+    name: homelab-komodo
+
 volumes:
   mongo-data:
   mongo-config:
   keys:
+  caddy-data:
+  caddy-config:

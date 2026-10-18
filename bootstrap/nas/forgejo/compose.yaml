@@ -28,3 +28,13 @@ services:
     ports:
       - "3000:3000"
       - "2222:22"
+    networks:
+      - default
+      # Same network as bootstrap/nas/komodo so webhooks can use http://core:9120
+      # (plain HTTP on the compose network; LAN clients still use HTTPS via Caddy).
+      - komodo
+
+networks:
+  komodo:
+    external: true
+    name: homelab-komodo
