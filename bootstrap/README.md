@@ -14,7 +14,7 @@ Search the repo for `CHANGE ME` and fix each one. The ones that matter most:
 |---|---|
 | `hosts.toml` | Orange Pi IP, Forgejo `owner/repo` if not `jeff/homelab`, `reserved_ports` for anything you already run on either box |
 | `bootstrap/nas/forgejo/compose.yaml` | `USER_UID` / `USER_GID` (run `id` on the NAS as the user who'll own the data) |
-| `bootstrap/nas/komodo/env.example` | Copied to `.env` in step 2; all `CHANGE_ME` values |
+| `bootstrap/nas/komodo/env.example` | Copied to `.env` in step 2; all `CHANGE_ME` values (secrets + `KOMODO_ALLOWED_SOURCES`) |
 
 If you change `repo`/`account` in `hosts.toml`, also update the two example stack files in `komodo/stacks/` (or delete the examples). `python scripts/validate.py` will flag any mismatch.
 
@@ -159,6 +159,8 @@ Repo → Settings → Webhooks → Add webhook → **Forgejo**:
 | Secret | `KOMODO_WEBHOOK_SECRET` from `.env` |
 | Trigger | Push events |
 | Branch filter | `main` |
+
+The webhook URL uses the Docker DNS name `core` on the shared `homelab-komodo` network (plain HTTP inside the network). LAN browsers still use `https://komodo.lan:9120`. If Forgejo was created before that network existed, recreate it: `docker network create homelab-komodo; cd ~/bootstrap/forgejo && docker compose up -d`.
 
 Komodo checks the signature using its GitHub-style listener, which also accepts Forgejo's webhooks. Use **Test delivery** and check that the procedure runs in Komodo.
 
