@@ -35,10 +35,11 @@ hosts/<host>/<service>/compose.yaml     what runs (plus Dockerfile, src/, README
 komodo/stacks/<host>/<service>.toml     how Komodo deploys it (one stack per file)
 komodo/procedures.toml                  the deploy-on-push procedure: do not edit
 hosts.toml                              machines, git settings, reserved ports
-scripts/demesne                         Jeff-facing CLI (host add/script, new, validate, ls)
+scripts/demesne                         Jeff-facing CLI (bootstrap, host add/script, new, validate, ls)
 scripts/new_service.py                  scaffold a new service (or: demesne new)
 scripts/validate.py                     convention checker; must pass (or: demesne validate)
-bootstrap/                              one-time infra setup (Forgejo, Komodo): do not edit
+bootstrap/                              one-time infra setup (Forgejo, Komodo)
+bootstrap/nas/interview.sh              interactive first-time NAS setup (Jeff; do not run as agent)
 ```
 
 The directory a service lives in decides which machine it runs on. Moving a service between hosts means moving its directory **and** its stack file, and Jeff destroying the old stack in Komodo (say so in the PR).
