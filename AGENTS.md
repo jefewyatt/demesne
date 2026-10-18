@@ -4,6 +4,10 @@ This repo is the single source of truth for every service running in Jeff's home
 **Merging to `main` deploys.** Komodo watches `main`, syncs `komodo/`, and runs
 `docker compose up` on the right machine. Nothing else deploys anything.
 
+Architecture overview, Jeff's day-to-day ops, and **adding a new host** are in
+[`README.md`](README.md). Follow this file for service work; do not edit
+`hosts.toml` or install Periphery yourself.
+
 ## Your role
 
 - Work on a branch. Never push to `main` (it's protected anyway).
